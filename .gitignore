@@ -1,0 +1,11 @@
+# 依赖
+node_modules/
+
+# 用户人格卡与激活状态（个人数据，不要传）
+personas/
+active.json
+
+# 杂项
+*.log
+.DS_Store
+Thumbs.db

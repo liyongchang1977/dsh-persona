@@ -1,0 +1,11 @@
+# dsh-persona bundle layer: mount the conversation-persona injector.
+# 由 DeepSeek Harness 依据 package.json 的 dsh.bundle 清单加载。
+#
+# 可选配置（写在 name 下面，缩进对齐）：
+#   config:
+#     dir: C:\Users\you\.dsh\personas   # 人格卡目录
+#     order: 10250                      # 注入在系统提示里的位置
+#     maxChars: 4000                    # 人格正文上限
+- insert:
+    - id: dsh-persona
+      name: dsh-persona

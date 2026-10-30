@@ -1,0 +1,50 @@
+{
+  "name": "dsh-persona",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "给 DeepSeek Harness 加上可切换的对话人格：人格卡是 markdown 文件，设置页点选即换，下一轮生效。",
+  "main": "./dsh/index.js",
+  "exports": {
+    ".": "./dsh/index.js",
+    "./client": {
+      "default": "./lib/client.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dsh",
+    "lib",
+    "cordis.patch.yml",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "persona",
+    "personality",
+    "system-prompt"
+  ],
+  "license": "MIT",
+  "author": "黎永昌 <15367262609@163.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/yourname/dsh-persona.git"
+  },
+  "homepage": "https://github.com/yourname/dsh-persona#readme",
+  "bugs": {
+    "url": "https://github.com/yourname/dsh-persona/issues"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web"
+    }
+  }
+}
