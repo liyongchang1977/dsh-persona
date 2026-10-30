@@ -1,8 +1,8 @@
 {
   "name": "dsh-persona",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
-  "description": "给 DeepSeek Harness 加上可切换的对话人格：人格卡是 markdown 文件，设置页点选即换，下一轮生效。",
+  "description": "给 DeepSeek Harness 加上可切换、可改写的对话人格：模板可选、正文可编辑、可追加提示词，下一轮对话生效。",
   "main": "./dsh/index.js",
   "exports": {
     ".": "./dsh/index.js",

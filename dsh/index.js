@@ -113,15 +113,20 @@ function listPersonas(cfg) {
 }
 
 function readActive(cfg) {
+  const str = (value) => (typeof value === 'string' ? value : '')
   try {
     const data = JSON.parse(readFileSync(join(cfg.dir, ACTIVE_FILE), 'utf8'))
     return {
-      active: typeof data.active === 'string' ? data.active : '',
+      // active 是旧字段，新逻辑以 template / body / extra 为准
+      active: str(data.active),
+      template: str(data.template),
+      body: str(data.body),
+      extra: str(data.extra),
       // 可选：按会话覆盖，{ "<sessionId>": "<personaId>" }
       sessions: data.sessions && typeof data.sessions === 'object' ? data.sessions : {},
     }
   } catch {
-    return { active: '', sessions: {} }
+    return { active: '', template: '', body: '', extra: '', sessions: {} }
   }
 }
 
@@ -133,25 +138,47 @@ function writeActive(cfg, patch) {
   return next
 }
 
-// 这个会话该用哪张人格卡：会话覆盖 > 全局激活 > 空（不注入）
-function personaIdFor(cfg, sessionId) {
-  const state = readActive(cfg)
-  const sid = typeof sessionId === 'string' ? sessionId.trim() : ''
-  if (sid && state.sessions[sid]) return state.sessions[sid]
-  return state.active
+// 读某个模板卡的 { id, name, body }；没有就返回 null。body 是原文，不含任何包装。
+function readTemplate(cfg, id) {
+  if (!id) return null
+  const file = join(cfg.dir, `${id}.md`)
+  if (!existsSync(file)) return null
+  const { meta, body } = parsePersona(readFileSync(file, 'utf8'))
+  const title = typeof meta.name === 'string' && meta.name ? meta.name : id
+  return { id, name: title, body }
 }
 
-function readPersonaBody(cfg, id) {
-  if (!id) return ''
-  const file = join(cfg.dir, `${id}.md`)
-  if (!existsSync(file)) return ''
-  const { meta, body } = parsePersona(readFileSync(file, 'utf8'))
-  const clipped =
-    body.length > cfg.maxChars
-      ? `${body.slice(0, cfg.maxChars)}\n\n（人格卡过长，后面 ${body.length - cfg.maxChars} 字已省略）`
-      : body
-  const title = typeof meta.name === 'string' && meta.name ? meta.name : id
-  return `## 对话人格：${title}\n\n下面是你说话的方式。它只决定语气、措辞和称呼，不改变任务本身的技术判断、事实准确性和做事方式；两者冲突时以任务为准。\n\n${clipped}`
+function clipBody(cfg, raw) {
+  const body = String(raw || '').trim()
+  if (body.length <= cfg.maxChars) return body
+  return `${body.slice(0, cfg.maxChars)}\n\n（人格正文过长，后面 ${body.length - cfg.maxChars} 字已省略）`
+}
+
+// 当前该注入什么：模板（会话覆盖 > 全局）+ 用户改过的正文 + 追加提示词
+function resolvePersona(cfg, sessionId) {
+  const state = readActive(cfg)
+  const sid = typeof sessionId === 'string' ? sessionId.trim() : ''
+  const sessionTemplate = sid && state.sessions[sid] ? state.sessions[sid] : ''
+  return {
+    templateId: sessionTemplate || state.template || state.active || '',
+    edited: state.body || '',
+    extra: state.extra || '',
+  }
+}
+
+// 拼成最终注入文本。模板原文和追加都为空时返回空串（不注入，省上下文）。
+function buildPersonaText(cfg, current) {
+  const tpl = readTemplate(cfg, current.templateId)
+  const body = clipBody(cfg, current.edited || (tpl ? tpl.body : ''))
+  const tail = String(current.extra || '').trim()
+  if (!body && !tail) return ''
+  const parts = [
+    `## 对话人格：${tpl ? tpl.name : '自定义'}`,
+    '下面是你说话的方式。它只决定语气、措辞和称呼，不改变任务本身的技术判断、事实准确性和做事方式；两者冲突时以任务为准。',
+  ]
+  if (body) parts.push(body)
+  if (tail) parts.push(`### 额外交代\n\n${tail}`)
+  return parts.join('\n\n')
 }
 
 // 首次运行：把 roost 已有的人格卡抄过来，用户的老人格不至于丢。
@@ -196,12 +223,8 @@ export function apply(ctx, userConfig = {}) {
 
   seedIfEmpty(cfg)
 
-  // 没有激活人格时不注入任何东西，省下上下文。
-  const renderFor = (sessionId) => {
-    const id = personaIdFor(cfg, sessionId)
-    const text = readPersonaBody(cfg, id)
-    return text || ''
-  }
+  // 模板和追加都为空时不注入任何东西，省下上下文。
+  const renderFor = (sessionId) => buildPersonaText(cfg, resolvePersona(cfg, sessionId))
 
   const mounted = new Map()
   let disposed = false
@@ -372,6 +395,60 @@ export function apply(ctx, userConfig = {}) {
     console.error('[persona] 预览路由注册失败：' + (e && e.message))
   }
 
+  // GET 读当前配置（模板 + 可编辑正文 + 追加提示词），POST 保存整份配置
+  try {
+    ctx.effect(() =>
+      ctx.webServer.register({
+        kind: 'exact',
+        path: '/dsh-persona/config',
+        handler: async (req, res) => {
+          try {
+            if (req.method === 'POST') {
+              const body = (await readBody(req)) || {}
+              const template = String(body.template ?? '').trim()
+              if (template && !existsSync(join(cfg.dir, `${template}.md`))) {
+                return sendJson(res, 404, { ok: false, error: `没有这张人格卡：${template}` })
+              }
+              const typed = typeof body.body === 'string' ? body.body : ''
+              const extra = typeof body.extra === 'string' ? body.extra : ''
+              const tpl = readTemplate(cfg, template)
+              // 和模板原文一字不差就不用另存，保持「跟随模板」
+              const edited = tpl && typed.trim() === tpl.body.trim() ? '' : typed
+              const state = writeActive(cfg, { template, active: template, body: edited, extra })
+              return sendJson(res, 200, {
+                ok: true,
+                template: state.template,
+                followsTemplate: !state.body,
+                chars: buildPersonaText(cfg, {
+                  templateId: state.template,
+                  edited: state.body,
+                  extra: state.extra,
+                }).length,
+                appliesTo: '下一轮对话',
+              })
+            }
+            const current = resolvePersona(cfg, '')
+            const tpl = readTemplate(cfg, current.templateId)
+            return sendJson(res, 200, {
+              ok: true,
+              dir: cfg.dir,
+              template: current.templateId,
+              templateName: tpl ? tpl.name : '',
+              templateBody: tpl ? tpl.body : '',
+              body: current.edited,
+              extra: current.extra,
+              personas: listPersonas(cfg),
+            })
+          } catch (e) {
+            return sendJson(res, 500, { ok: false, error: String((e && e.message) || e) })
+          }
+        },
+      }),
+    )
+  } catch (e) {
+    console.error('[persona] 配置路由注册失败：' + (e && e.message))
+  }
+
   // --- 给 agent 的工具 --------------------------------------------------
 
   const tools = [
@@ -385,13 +462,18 @@ export function apply(ctx, userConfig = {}) {
         render: (_args, value) => textResult(value),
       },
       execute: async () => {
-        const state = readActive(cfg)
+        const current = resolvePersona(cfg, '')
         const personas = listPersonas(cfg)
         return {
           dir: cfg.dir,
-          active: state.active || '',
+          template: current.templateId || '',
+          templateName: (readTemplate(cfg, current.templateId) || {}).name || '',
+          hasCustomBody: !!current.edited.trim(),
+          extra: current.extra || '',
           personas,
-          hint: personas.length ? '用 persona_use 切换，persona_show 看全文' : '还没有人格卡，用 persona_save 新建一张',
+          hint: personas.length
+            ? '用 persona_use 换模板，persona_set 改正文或追加提示词'
+            : '还没有人格卡，用 persona_save 新建一张',
         }
       },
     },
@@ -417,8 +499,8 @@ export function apply(ctx, userConfig = {}) {
           const available = listPersonas(cfg).map((p) => p.id)
           return { error: `没有这张人格卡：${id}`, available }
         }
-        const state = writeActive(cfg, { active: id })
-        return { ok: true, active: state.active || '(已关闭)', appliesTo: '下一轮对话' }
+        const state = writeActive(cfg, { active: id, template: id, body: '' })
+        return { ok: true, template: state.template || '(已关闭)', appliesTo: '下一轮对话' }
       },
     },
     {
@@ -437,7 +519,7 @@ export function apply(ctx, userConfig = {}) {
         render: (_args, value) => textResult(value),
       },
       execute: async (args) => {
-        const id = String(args.id ?? '').trim() || readActive(cfg).active
+        const id = String(args.id ?? '').trim() || resolvePersona(cfg, '').templateId
         if (!id) return { error: '当前没有激活的人格，也没指定 id' }
         const file = join(cfg.dir, `${id}.md`)
         if (!existsSync(file)) return { error: `没有这张人格卡：${id}` }
@@ -480,6 +562,48 @@ export function apply(ctx, userConfig = {}) {
         const file = join(cfg.dir, `${id}.md`)
         writeFileSync(file, front + content + '\n', 'utf8')
         return { ok: true, id, name, chars: content.length, file, next: `persona_use({ id: "${id}" }) 激活` }
+      },
+    },
+    {
+      name: 'persona_set',
+      description:
+        '设置当前对话人格的整份配置：template 是模板卡 id（可空，空表示不基于任何模板），body 是可编辑正文（空则跟随模板原文），extra 是追加在人格后面的自定义提示词。下一轮对话生效。',
+      parameters: {
+        type: 'object',
+        properties: {
+          template: { type: 'string', description: '模板卡 id，例如 fatfish；传空字符串表示不用模板' },
+          body: { type: 'string', description: '人格正文，可自由编辑；省略或空串表示跟随模板原文' },
+          extra: { type: 'string', description: '追加在人格后面的自定义提示词' },
+        },
+        required: [],
+        additionalProperties: false,
+      },
+      output: {
+        schema: { type: 'object', additionalProperties: true },
+        render: (_args, value) => textResult(value),
+      },
+      execute: async (args) => {
+        const template = String(args.template ?? '').trim()
+        if (template && !existsSync(join(cfg.dir, `${template}.md`))) {
+          return { error: `没有这张人格卡：${template}`, available: listPersonas(cfg).map((p) => p.id) }
+        }
+        const typed = typeof args.body === 'string' ? args.body : ''
+        const extra = typeof args.extra === 'string' ? args.extra : ''
+        const tpl = readTemplate(cfg, template)
+        const edited = tpl && typed.trim() === tpl.body.trim() ? '' : typed
+        const state = writeActive(cfg, { template, active: template, body: edited, extra })
+        return {
+          ok: true,
+          template: state.template || '(无模板)',
+          followsTemplate: !state.body,
+          hasExtra: !!state.extra.trim(),
+          chars: buildPersonaText(cfg, {
+            templateId: state.template,
+            edited: state.body,
+            extra: state.extra,
+          }).length,
+          appliesTo: '下一轮对话',
+        }
       },
     },
   ]
