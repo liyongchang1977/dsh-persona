@@ -26,8 +26,8 @@
 # 1. 进到你的 DSH profile 目录（Windows 默认在 ~/.dsh/profiles/desktop）
 cd ~/.dsh/profiles/desktop
 
-# 2. 装包（把 yourname 换成仓库实际地址）
-pnpm add dsh-persona@git+https://github.com/yourname/dsh-persona.git
+# 2. 装包
+pnpm add dsh-persona@git+https://github.com/liyongchang1977/dsh-persona.git
 
 # 3. 登记到 bundle 清单
 #    打开同目录下的 package.json，找到 "dsh" -> "profile" -> "bundles"，
@@ -198,7 +198,7 @@ dsh-persona/
 
 ## 发布前要改的
 
-如果你 fork 了这份代码要发自己的仓库，记得把两处 `yourname` 换掉：
+如果你 fork 了这份代码要发自己的仓库，记得把两处 `liyongchang1977` 换掉：
 
 - `package.json` 里的 `repository` / `homepage` / `bugs`
 - 本文档「安装」一节里的 git 地址

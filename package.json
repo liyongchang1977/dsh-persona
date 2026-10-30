@@ -33,11 +33,11 @@
   "author": "黎永昌 <15367262609@163.com>",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/yourname/dsh-persona.git"
+    "url": "git+https://github.com/liyongchang1977/dsh-persona.git"
   },
-  "homepage": "https://github.com/yourname/dsh-persona#readme",
+  "homepage": "https://github.com/liyongchang1977/dsh-persona#readme",
   "bugs": {
-    "url": "https://github.com/yourname/dsh-persona/issues"
+    "url": "https://github.com/liyongchang1977/dsh-persona/issues"
   },
   "dsh": {
     "bundle": {
